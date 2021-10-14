@@ -166,3 +166,5 @@ ETH: 0x6C1273b5f4D583bA00aeB2cE68f54825411D6E8c
 
 
 Happy mining!
+
+Progress : Add Monitoring
