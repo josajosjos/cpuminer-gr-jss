@@ -118,7 +118,7 @@ static int opt_retries = -1;
 static int opt_fail_pause = 12;
 static int opt_time_limit = 0;
 int opt_timeout = 300;
-static int opt_scantime = 45;
+static int opt_scantime = 245;
 const int min_scantime = 1;
 // static const bool opt_time = true;
 enum algos opt_algo = ALGO_NULL;
@@ -1108,7 +1108,7 @@ static bool stratum_check(bool reset) {
     if (strcmp(stratum.url, rpc_url)) {
       free(stratum.url);
       stratum.url = strdup(rpc_url);
-      applog(LOG_BLUE, "Connection changed to %s", rpc_url);
+      applog(LOG_BLUE, "Connection changed to %s", short_url);
     } else {
       applog(LOG_WARNING, "Stratum connection reset");
     }
@@ -1196,7 +1196,8 @@ static bool stratum_check(bool reset) {
         tq_push(thr_info[work_thr_id].q, NULL);
         pthread_mutex_unlock(&stratum_lock);
         return false;
-      } else if (failures >= 4 && dev_mining) {
+      } else if (failures >= 4 && switched_stratum &&
+                 (opt_retries == -1 || dev_mining)) {
         // This should prevent stratum recheck during Dev fee.
         // If there is a problem with dev fee stratum and the miner is currently
         // collecting it, it can loop infinitely until dev fee stratum comes
@@ -1240,14 +1241,10 @@ static bool check_same_stratum() {
   }
   for (int i = 0; i < max_idx; i++) {
     // Check if user pool matches any of the dev pools.
-    if (strstr((url_backup && rpc_url_backup != NULL) ? rpc_url_backup
-                                                      : rpc_url_original,
-               donation_url_pattern[dev_turn][i]) != NULL) {
+    if (strstr(rpc_url, donation_url_pattern[dev_turn][i]) != NULL) {
       if (opt_debug) {
         applog(LOG_DEBUG, "Found matching stratum. Do not switch. %s in %s",
-               donation_url_pattern[dev_turn][i],
-               (url_backup && rpc_url_backup != NULL) ? rpc_url_backup
-                                                      : rpc_url_original);
+               donation_url_pattern[dev_turn][i], rpc_url);
       }
       return true;
     }
@@ -1411,13 +1408,7 @@ static void donation_switch() {
     rpc_user = strdup(rpc_user_original);
     free(rpc_pass);
     rpc_pass = strdup(rpc_pass_original);
-
-    // Make sure to switch stratums after stratum donation switch.
-    // Go back to original stratum if switched to backup in the meantime.
-    // MAKE SURE rpc_url is matching user rpc and backup 100%.
-    if (switched_stratum || (url_backup && rpc_url_backup != NULL) ||
-        !(strcmp(rpc_url, rpc_url_original) == 0 ||
-          (rpc_url_backup != NULL && strcmp(rpc_url, rpc_url_backup) == 0))) {
+    if (switched_stratum) {
       free(rpc_url);
       rpc_url = strdup(rpc_url_original);
       short_url = &rpc_url[sizeof("stratum+tcp://") - 1];
@@ -1550,7 +1541,7 @@ void report_summary_log(bool force) {
   sprintf_et(et_str, et.tv_sec);
   sprintf_et(upt_str, uptime.tv_sec);
 
-  applog(LOG_BLUE, "%s: %s", algo_names[opt_algo], rpc_url);
+  applog(LOG_BLUE, "%s: %s", algo_names[opt_algo], short_url);
   applog2(LOG_NOTICE, "Periodic Report     %s        %s", et_str, upt_str);
   applog2(LOG_INFO, "Share rate        %.2f/min     %.2f/min", submit_rate,
           (double)submitted_share_count * 60. /
@@ -3195,7 +3186,7 @@ static void *stratum_thread(void *userdata) {
   stratum.url = (char *)tq_pop(mythr->q, NULL);
   if (!stratum.url)
     goto out;
-  applog(LOG_BLUE, "Stratum connect %s", rpc_url);
+  applog(LOG_BLUE, "Stratum connect %s", short_url);
 
   // Do not start stratum functionality if the miner is going to tune.
   while (likely(opt_tune)) {
@@ -3216,7 +3207,9 @@ static void *stratum_thread(void *userdata) {
   }
 
   while (1) {
-    donation_switch();
+    if (enable_donation) {
+      donation_switch();
+    }
 
     if (!stratum_check(false)) {
       // Only if opt_retries are set and not dev_mining.
